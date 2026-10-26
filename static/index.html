@@ -1,1 +1,570 @@
-FULL_HTML_WILL_BE_PASTED
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quản lý Kho hàng</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .nav-item.active { background: #3b82f6; color: white; }
+    .card { transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1); }
+    .modal { display: none; }
+    .modal.show { display: flex; }
+    input, select, textarea { transition: all 0.2s; }
+    input:focus, select:focus, textarea:focus { outline: none; ring: 2px; }
+    .low-stock { background: #fef2f2; border-left: 4px solid #ef4444; }
+    .toast { position: fixed; bottom: 20px; right: 20px; z-index: 1000; animation: slideIn 0.3s; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Header -->
+  <header class="bg-white shadow-sm border-b sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+          <i class="fas fa-warehouse text-white text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-gray-800">Quản lý Kho hàng</h1>
+          <p class="text-xs text-gray-500">Hệ thống quản lý tồn kho chuyên nghiệp</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-sm text-gray-600">
+        <i class="fas fa-user-circle"></i>
+        <span>Admin</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto px-4 py-6 flex gap-6">
+    <!-- Sidebar -->
+    <aside class="w-64 flex-shrink-0">
+      <nav class="bg-white rounded-xl shadow-sm p-2 space-y-1 sticky top-24">
+        <button onclick="switchTab('dashboard')" class="nav-item w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 text-gray-700 hover:bg-gray-100 transition" data-tab="dashboard">
+          <i class="fas fa-chart-pie w-5"></i> Tổng quan
+        </button>
+        <button onclick="switchTab('products')" class="nav-item w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 text-gray-700 hover:bg-gray-100 transition" data-tab="products">
+          <i class="fas fa-boxes w-5"></i> Sản phẩm
+        </button>
+        <button onclick="switchTab('stockin')" class="nav-item w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 text-gray-700 hover:bg-gray-100 transition" data-tab="stockin">
+          <i class="fas fa-arrow-down text-green-600 w-5"></i> Nhập kho
+        </button>
+        <button onclick="switchTab('stockout')" class="nav-item w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 text-gray-700 hover:bg-gray-100 transition" data-tab="stockout">
+          <i class="fas fa-arrow-up text-red-600 w-5"></i> Xuất kho
+        </button>
+        <button onclick="switchTab('check')" class="nav-item w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 text-gray-700 hover:bg-gray-100 transition" data-tab="check">
+          <i class="fas fa-clipboard-check w-5"></i> Kiểm kê
+        </button>
+        <button onclick="switchTab('history')" class="nav-item w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 text-gray-700 hover:bg-gray-100 transition" data-tab="history">
+          <i class="fas fa-history w-5"></i> Lịch sử
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1">
+      <!-- Dashboard -->
+      <div id="dashboard" class="tab-content active">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Tổng quan kho hàng</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" id="stats-cards"></div>
+        <div class="bg-white rounded-xl shadow-sm p-6">
+          <h3 class="font-semibold text-gray-800 mb-4">Sản phẩm tồn kho thấp</h3>
+          <div id="low-stock-list" class="space-y-2"></div>
+        </div>
+      </div>
+
+      <!-- Products -->
+      <div id="products" class="tab-content">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-2xl font-bold text-gray-800">Danh sách sản phẩm</h2>
+          <button onclick="openModal('add')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2">
+            <i class="fas fa-plus"></i> Thêm sản phẩm
+          </button>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4 mb-4 flex gap-3">
+          <input type="text" id="search-input" placeholder="Tìm theo tên hoặc SKU..." class="flex-1 border rounded-lg px-4 py-2" oninput="loadProducts()">
+          <select id="category-filter" class="border rounded-lg px-4 py-2" onchange="loadProducts()">
+            <option value="">Tất cả danh mục</option>
+          </select>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <table class="w-full">
+            <thead class="bg-gray-50 border-b">
+              <tr>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">SKU</th>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Tên sản phẩm</th>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Danh mục</th>
+                <th class="text-right px-4 py-3 text-sm font-medium text-gray-600">Tồn kho</th>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Vị trí</th>
+                <th class="text-right px-4 py-3 text-sm font-medium text-gray-600">Giá</th>
+                <th class="text-center px-4 py-3 text-sm font-medium text-gray-600">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="products-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Stock In -->
+      <div id="stockin" class="tab-content">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Nhập kho</h2>
+        <div class="bg-white rounded-xl shadow-sm p-6 max-w-xl">
+          <form id="form-in" onsubmit="stockIn(event)" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Sản phẩm</label>
+              <select id="in-product" class="w-full border rounded-lg px-4 py-2" required></select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Số lượng nhập</label>
+              <input type="number" id="in-qty" min="1" class="w-full border rounded-lg px-4 py-2" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
+              <textarea id="in-note" class="w-full border rounded-lg px-4 py-2" rows="2" placeholder="Nhà cung cấp, lý do..."></textarea>
+            </div>
+            <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition">Nhập kho</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Stock Out -->
+      <div id="stockout" class="tab-content">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Xuất kho</h2>
+        <div class="bg-white rounded-xl shadow-sm p-6 max-w-xl">
+          <form id="form-out" onsubmit="stockOut(event)" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Sản phẩm</label>
+              <select id="out-product" class="w-full border rounded-lg px-4 py-2" required></select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Số lượng xuất</label>
+              <input type="number" id="out-qty" min="1" class="w-full border rounded-lg px-4 py-2" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
+              <textarea id="out-note" class="w-full border rounded-lg px-4 py-2" rows="2" placeholder="Khách hàng, đơn hàng..."></textarea>
+            </div>
+            <button type="submit" class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition">Xuất kho</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Stock Check / Adjust -->
+      <div id="check" class="tab-content">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Kiểm kê tồn kho</h2>
+        <div class="bg-white rounded-xl shadow-sm p-6 max-w-xl">
+          <form id="form-adjust" onsubmit="stockAdjust(event)" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Sản phẩm</label>
+              <select id="adjust-product" class="w-full border rounded-lg px-4 py-2" required onchange="showCurrentStock()"></select>
+            </div>
+            <div id="current-stock-info" class="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg hidden"></div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Số lượng thực tế</label>
+              <input type="number" id="adjust-qty" min="0" class="w-full border rounded-lg px-4 py-2" required>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
+              <textarea id="adjust-note" class="w-full border rounded-lg px-4 py-2" rows="2" placeholder="Lý do điều chỉnh..."></textarea>
+            </div>
+            <button type="submit" class="w-full bg-amber-600 text-white py-2 rounded-lg hover:bg-amber-700 transition">Cập nhật tồn kho</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div id="history" class="tab-content">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">Lịch sử giao dịch</h2>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <table class="w-full">
+            <thead class="bg-gray-50 border-b">
+              <tr>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Thời gian</th>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Sản phẩm</th>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Loại</th>
+                <th class="text-right px-4 py-3 text-sm font-medium text-gray-600">Số lượng</th>
+                <th class="text-left px-4 py-3 text-sm font-medium text-gray-600">Ghi chú</th>
+              </tr>
+            </thead>
+            <tbody id="history-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal Add/Edit Product -->
+  <div id="product-modal" class="modal fixed inset-0 bg-black/50 items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div class="p-6 border-b flex justify-between items-center">
+        <h3 class="text-lg font-semibold" id="modal-title">Thêm sản phẩm</h3>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+      </div>
+      <form id="product-form" onsubmit="saveProduct(event)" class="p-6 space-y-4">
+        <input type="hidden" id="edit-id">
+        <div>
+          <label class="block text-sm font-medium mb-1">SKU *</label>
+          <input type="text" id="p-sku" required class="w-full border rounded-lg px-3 py-2">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Tên sản phẩm *</label>
+          <input type="text" id="p-name" required class="w-full border rounded-lg px-3 py-2">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">Danh mục</label>
+            <input type="text" id="p-category" class="w-full border rounded-lg px-3 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Đơn vị</label>
+            <input type="text" id="p-unit" value="cái" class="w-full border rounded-lg px-3 py-2">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">Số lượng ban đầu</label>
+            <input type="number" id="p-quantity" value="0" min="0" class="w-full border rounded-lg px-3 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Tồn tối thiểu</label>
+            <input type="number" id="p-min" value="10" min="0" class="w-full border rounded-lg px-3 py-2">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">Vị trí</label>
+            <input type="text" id="p-location" class="w-full border rounded-lg px-3 py-2">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Giá (VNĐ)</label>
+            <input type="number" id="p-price" value="0" min="0" class="w-full border rounded-lg px-3 py-2">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Mô tả</label>
+          <textarea id="p-desc" class="w-full border rounded-lg px-3 py-2" rows="2"></textarea>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="button" onclick="closeModal()" class="flex-1 border py-2 rounded-lg">Hủy</button>
+          <button type="submit" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">Lưu</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let productsCache = [];
+    let currentEditId = null;
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      document.getElementById(tab).classList.add('active');
+      document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+      
+      if (tab === 'dashboard') loadDashboard();
+      if (tab === 'products') loadProducts();
+      if (tab === 'stockin' || tab === 'stockout' || tab === 'check') loadProductSelects();
+      if (tab === 'history') loadHistory();
+    }
+
+    async function loadDashboard() {
+      const stats = await fetch('/api/stats').then(r => r.json());
+      const cards = document.getElementById('stats-cards');
+      cards.innerHTML = `
+        <div class="card bg-white p-6 rounded-xl shadow-sm border">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Tổng sản phẩm</p>
+              <p class="text-2xl font-bold text-gray-800">${stats.total_products}</p>
+            </div>
+            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <i class="fas fa-box text-blue-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+        <div class="card bg-white p-6 rounded-xl shadow-sm border">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Tổng tồn kho</p>
+              <p class="text-2xl font-bold text-gray-800">${stats.total_quantity.toLocaleString()}</p>
+            </div>
+            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+              <i class="fas fa-cubes text-green-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+        <div class="card bg-white p-6 rounded-xl shadow-sm border">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Giá trị tồn kho</p>
+              <p class="text-2xl font-bold text-gray-800">${formatMoney(stats.total_value)}</p>
+            </div>
+            <div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+              <i class="fas fa-coins text-amber-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+        <div class="card bg-white p-6 rounded-xl shadow-sm border">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Tồn thấp</p>
+              <p class="text-2xl font-bold text-red-600">${stats.low_stock}</p>
+            </div>
+            <div class="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
+              <i class="fas fa-exclamation-triangle text-red-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Low stock
+      const prods = await fetch('/api/products').then(r => r.json());
+      const low = prods.filter(p => p.quantity <= p.min_stock).slice(0, 8);
+      const list = document.getElementById('low-stock-list');
+      if (low.length === 0) {
+        list.innerHTML = '<p class="text-gray-500 text-sm">Không có sản phẩm nào tồn kho thấp.</p>';
+      } else {
+        list.innerHTML = low.map(p => `
+          <div class="flex justify-between items-center p-3 rounded-lg low-stock">
+            <div>
+              <span class="font-medium">${p.name}</span>
+              <span class="text-xs text-gray-500 ml-2">${p.sku}</span>
+            </div>
+            <div class="text-right">
+              <span class="font-bold text-red-600">${p.quantity}</span>
+              <span class="text-xs text-gray-500"> / min ${p.min_stock}</span>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    async function loadProducts() {
+      const search = document.getElementById('search-input').value;
+      const cat = document.getElementById('category-filter').value;
+      const url = `/api/products?search=${encodeURIComponent(search)}&category=${encodeURIComponent(cat)}`;
+      const products = await fetch(url).then(r => r.json());
+      productsCache = products;
+      
+      const tbody = document.getElementById('products-table');
+      tbody.innerHTML = products.map(p => `
+        <tr class="border-b hover:bg-gray-50 ${p.quantity <= p.min_stock ? 'low-stock' : ''}">
+          <td class="px-4 py-3 text-sm font-mono">${p.sku}</td>
+          <td class="px-4 py-3">
+            <div class="font-medium">${p.name}</div>
+            <div class="text-xs text-gray-500">${p.description || ''}</div>
+          </td>
+          <td class="px-4 py-3 text-sm">${p.category || '-'}</td>
+          <td class="px-4 py-3 text-right font-semibold ${p.quantity <= p.min_stock ? 'text-red-600' : ''}">${p.quantity} ${p.unit}</td>
+          <td class="px-4 py-3 text-sm">${p.location || '-'}</td>
+          <td class="px-4 py-3 text-right text-sm">${formatMoney(p.price)}</td>
+          <td class="px-4 py-3 text-center">
+            <button onclick="editProduct('${p.id}')" class="text-blue-600 hover:text-blue-800 mx-1"><i class="fas fa-edit"></i></button>
+            <button onclick="deleteProduct('${p.id}')" class="text-red-600 hover:text-red-800 mx-1"><i class="fas fa-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
+      
+      // Categories
+      const cats = await fetch('/api/categories').then(r => r.json());
+      const sel = document.getElementById('category-filter');
+      const current = sel.value;
+      sel.innerHTML = '<option value="">Tất cả danh mục</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+      sel.value = current;
+    }
+
+    async function loadProductSelects() {
+      const products = await fetch('/api/products').then(r => r.json());
+      const options = products.map(p => `<option value="${p.id}">${p.sku} - ${p.name} (tồn: ${p.quantity})</option>`).join('');
+      document.getElementById('in-product').innerHTML = options;
+      document.getElementById('out-product').innerHTML = options;
+      document.getElementById('adjust-product').innerHTML = options;
+    }
+
+    function showCurrentStock() {
+      const sel = document.getElementById('adjust-product');
+      const id = sel.value;
+      const p = productsCache.find(x => x.id === id) || {};
+      const info = document.getElementById('current-stock-info');
+      if (p.quantity !== undefined) {
+        info.innerHTML = `Tồn kho hiện tại: <strong>${p.quantity} ${p.unit || ''}</strong>`;
+        info.classList.remove('hidden');
+      }
+    }
+
+    async function stockIn(e) {
+      e.preventDefault();
+      const data = {
+        product_id: document.getElementById('in-product').value,
+        quantity: parseInt(document.getElementById('in-qty').value),
+        note: document.getElementById('in-note').value
+      };
+      const res = await fetch('/api/stock/in', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      if (res.ok) {
+        showToast('Nhập kho thành công!', 'success');
+        document.getElementById('form-in').reset();
+        loadProductSelects();
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Lỗi', 'error');
+      }
+    }
+
+    async function stockOut(e) {
+      e.preventDefault();
+      const data = {
+        product_id: document.getElementById('out-product').value,
+        quantity: parseInt(document.getElementById('out-qty').value),
+        note: document.getElementById('out-note').value
+      };
+      const res = await fetch('/api/stock/out', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      if (res.ok) {
+        showToast('Xuất kho thành công!', 'success');
+        document.getElementById('form-out').reset();
+        loadProductSelects();
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Lỗi', 'error');
+      }
+    }
+
+    async function stockAdjust(e) {
+      e.preventDefault();
+      const data = {
+        product_id: document.getElementById('adjust-product').value,
+        quantity: parseInt(document.getElementById('adjust-qty').value),
+        note: document.getElementById('adjust-note').value
+      };
+      const res = await fetch('/api/stock/adjust', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      if (res.ok) {
+        showToast('Cập nhật tồn kho thành công!', 'success');
+        document.getElementById('form-adjust').reset();
+        document.getElementById('current-stock-info').classList.add('hidden');
+        loadProductSelects();
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Lỗi', 'error');
+      }
+    }
+
+    async function loadHistory() {
+      const rows = await fetch('/api/movements?limit=100').then(r => r.json());
+      const tbody = document.getElementById('history-table');
+      tbody.innerHTML = rows.map(r => {
+        const typeMap = { in: '<span class="text-green-600 font-medium">Nhập</span>', out: '<span class="text-red-600 font-medium">Xuất</span>', adjust: '<span class="text-amber-600 font-medium">Điều chỉnh</span>' };
+        const qtyClass = r.type === 'out' ? 'text-red-600' : (r.type === 'in' ? 'text-green-600' : '');
+        return `
+          <tr class="border-b hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm">${formatDate(r.created_at)}</td>
+            <td class="px-4 py-3 text-sm">${r.sku} - ${r.product_name}</td>
+            <td class="px-4 py-3 text-sm">${typeMap[r.type] || r.type}</td>
+            <td class="px-4 py-3 text-right font-medium ${qtyClass}">${r.type === 'out' ? '-' : (r.type === 'in' ? '+' : '')}${r.quantity}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">${r.note || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openModal(mode, product = null) {
+      currentEditId = mode === 'edit' ? product.id : null;
+      document.getElementById('modal-title').textContent = mode === 'edit' ? 'Sửa sản phẩm' : 'Thêm sản phẩm';
+      document.getElementById('edit-id').value = currentEditId || '';
+      document.getElementById('p-sku').value = product?.sku || '';
+      document.getElementById('p-sku').disabled = mode === 'edit';
+      document.getElementById('p-name').value = product?.name || '';
+      document.getElementById('p-category').value = product?.category || '';
+      document.getElementById('p-unit').value = product?.unit || 'cái';
+      document.getElementById('p-quantity').value = product?.quantity || 0;
+      document.getElementById('p-quantity').disabled = mode === 'edit';
+      document.getElementById('p-min').value = product?.min_stock || 10;
+      document.getElementById('p-location').value = product?.location || '';
+      document.getElementById('p-price').value = product?.price || 0;
+      document.getElementById('p-desc').value = product?.description || '';
+      document.getElementById('product-modal').classList.add('show');
+    }
+
+    function closeModal() {
+      document.getElementById('product-modal').classList.remove('show');
+      document.getElementById('product-form').reset();
+      document.getElementById('p-sku').disabled = false;
+      document.getElementById('p-quantity').disabled = false;
+    }
+
+    async function saveProduct(e) {
+      e.preventDefault();
+      const data = {
+        sku: document.getElementById('p-sku').value,
+        name: document.getElementById('p-name').value,
+        category: document.getElementById('p-category').value,
+        unit: document.getElementById('p-unit').value,
+        quantity: parseInt(document.getElementById('p-quantity').value) || 0,
+        min_stock: parseInt(document.getElementById('p-min').value) || 0,
+        location: document.getElementById('p-location').value,
+        price: parseFloat(document.getElementById('p-price').value) || 0,
+        description: document.getElementById('p-desc').value
+      };
+      let url = '/api/products';
+      let method = 'POST';
+      if (currentEditId) {
+        url = `/api/products/${currentEditId}`;
+        method = 'PUT';
+        delete data.quantity; // không đổi số lượng khi edit
+        delete data.sku;
+      }
+      const res = await fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      if (res.ok) {
+        showToast(currentEditId ? 'Cập nhật thành công!' : 'Thêm sản phẩm thành công!', 'success');
+        closeModal();
+        loadProducts();
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Lỗi khi lưu', 'error');
+      }
+    }
+
+    async function editProduct(id) {
+      const p = productsCache.find(x => x.id === id);
+      if (p) openModal('edit', p);
+    }
+
+    async function deleteProduct(id) {
+      if (!confirm('Bạn có chắc muốn xóa sản phẩm này?')) return;
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Đã xóa sản phẩm', 'success');
+        loadProducts();
+      }
+    }
+
+    function formatMoney(n) {
+      return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n || 0);
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function showToast(msg, type = 'success') {
+      const toast = document.createElement('div');
+      toast.className = `toast px-4 py-3 rounded-lg shadow-lg text-white ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`;
+      toast.textContent = msg;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    // Init
+    document.addEventListener('DOMContentLoaded', () => {
+      switchTab('dashboard');
+    });
+  </script>
+</body>
+</html>
