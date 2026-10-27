@@ -1,32 +1,51 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 import os
 from datetime import datetime
 import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
+from functools import wraps
+import hashlib
 
 app = Flask(__name__, static_folder='static')
+app.secret_key = os.environ.get('SECRET_KEY', 'warehouse-secret-key-change-me')
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db():
     if not DATABASE_URL:
         raise Exception("DATABASE_URL not set")
-    result = urlparse(DATABASE_URL)
+    url = DATABASE_URL
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+    result = urlparse(url)
     conn = psycopg2.connect(
         database=result.path[1:],
         user=result.username,
         password=result.password,
         host=result.hostname,
-        port=result.port,
+        port=result.port or 5432,
         sslmode='require'
     )
     return conn
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT DEFAULT 'staff',
+            name TEXT,
+            created_at TEXT
+        )
+    ''')
     c.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id TEXT PRIMARY KEY,
@@ -49,55 +68,122 @@ def init_db():
             type TEXT,
             quantity INTEGER,
             note TEXT,
+            user_id TEXT,
             created_at TEXT
         )
     ''')
-    # Sample data
-    c.execute('SELECT COUNT(*) FROM products')
+    c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
+        admin_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        c.execute('''
+            INSERT INTO users (id, username, password, role, name, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (admin_id, 'admin', hash_password('admin123'), 'admin', 'Chủ cửa hàng', now))
         samples = [
             ('SP001', 'Laptop Dell XPS 13', 'Điện tử', 'cái', 25, 'Kệ A1', 5, 25000000, 'Laptop cao cấp'),
             ('SP002', 'Chuột Logitech MX Master', 'Phụ kiện', 'cái', 150, 'Kệ B2', 20, 1800000, 'Chuột không dây'),
             ('SP003', 'Bàn phím cơ Keychron K2', 'Phụ kiện', 'cái', 80, 'Kệ B1', 15, 2200000, 'Bàn phím cơ'),
-            ('SP004', 'Màn hình LG 27 inch', 'Điện tử', 'cái', 40, 'Kệ A2', 8, 5500000, 'Màn hình IPS'),
-            ('SP005', 'Tai nghe Sony WH-1000XM5', 'Âm thanh', 'cái', 60, 'Kệ C1', 10, 8500000, 'Tai nghe chống ồn'),
-            ('SP006', 'Ổ cứng SSD Samsung 1TB', 'Lưu trữ', 'cái', 200, 'Kệ D1', 30, 1800000, 'SSD NVMe'),
-            ('SP007', 'Giấy A4 Double A', 'Văn phòng phẩm', 'ream', 500, 'Kệ E1', 50, 85000, 'Giấy in'),
-            ('SP008', 'Bút bi Thiên Long', 'Văn phòng phẩm', 'hộp', 300, 'Kệ E2', 40, 35000, 'Bút viết'),
-            ('SP009', 'Ghế văn phòng ergonomic', 'Nội thất', 'cái', 15, 'Kệ F1', 3, 4500000, 'Ghế công thái học'),
-            ('SP010', 'Máy in HP LaserJet', 'Điện tử', 'cái', 12, 'Kệ A3', 2, 3200000, 'Máy in laser'),
-            ('SP011', 'Cáp USB-C 2m', 'Phụ kiện', 'cái', 400, 'Kệ B3', 50, 120000, 'Cáp sạc'),
-            ('SP012', 'Webcam Logitech C920', 'Phụ kiện', 'cái', 35, 'Kệ C2', 5, 2100000, 'Webcam HD'),
-            ('SP013', 'Router WiFi TP-Link', 'Mạng', 'cái', 45, 'Kệ D2', 8, 850000, 'Router dual band'),
-            ('SP014', 'Pin AA Energizer', 'Pin', 'hộp', 250, 'Kệ E3', 30, 45000, 'Pin tiểu'),
-            ('SP015', 'Nước rửa tay Lifebuoy', 'Vệ sinh', 'chai', 180, 'Kệ G1', 20, 35000, 'Nước rửa tay'),
         ]
-        now = datetime.now().isoformat()
         for s in samples:
             pid = str(uuid.uuid4())
             c.execute('''
                 INSERT INTO products (id, sku, name, category, unit, quantity, location, min_stock, price, description, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (pid, *s, now))
-            mid = str(uuid.uuid4())
-            c.execute('''
-                INSERT INTO movements (id, product_id, type, quantity, note, created_at)
-                VALUES (%s, %s, 'in', %s, 'Nhập kho ban đầu', %s)
-            ''', (mid, pid, s[4], now))
     conn.commit()
     conn.close()
 
-# Initialize on startup
 try:
     init_db()
 except Exception as e:
-    print("DB init error (will retry later):", e)
+    print("DB init error:", e)
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return jsonify({'error': 'Chưa đăng nhập'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+def role_required(*roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if 'user_id' not in session:
+                return jsonify({'error': 'Chưa đăng nhập'}), 401
+            if session.get('role') not in roles:
+                return jsonify({'error': 'Không có quyền'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
 
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    conn = get_db()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    c.execute('SELECT * FROM users WHERE username = %s', (username,))
+    user = c.fetchone()
+    conn.close()
+    if user and user['password'] == hash_password(password):
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        session['role'] = user['role']
+        session['name'] = user['name']
+        return jsonify({'success': True, 'user': {'username': user['username'], 'role': user['role'], 'name': user['name']}})
+    return jsonify({'error': 'Sai tài khoản hoặc mật khẩu'}), 401
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/api/me', methods=['GET'])
+def me():
+    if 'user_id' not in session:
+        return jsonify({'logged_in': False})
+    return jsonify({'logged_in': True, 'user': {'username': session.get('username'), 'role': session.get('role'), 'name': session.get('name')}})
+
+@app.route('/api/users', methods=['GET'])
+@role_required('admin')
+def get_users():
+    conn = get_db()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    c.execute('SELECT id, username, role, name, created_at FROM users ORDER BY created_at')
+    users = c.fetchall()
+    conn.close()
+    return jsonify(users)
+
+@app.route('/api/users', methods=['POST'])
+@role_required('admin')
+def add_user():
+    data = request.json
+    uid = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        c.execute('''
+            INSERT INTO users (id, username, password, role, name, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (uid, data['username'], hash_password(data['password']), data.get('role', 'staff'), data.get('name', ''), now))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'id': uid}), 201
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/api/products', methods=['GET'])
+@login_required
 def get_products():
     search = request.args.get('search', '').lower()
     category = request.args.get('category', '')
@@ -118,6 +204,7 @@ def get_products():
     return jsonify(products)
 
 @app.route('/api/products', methods=['POST'])
+@role_required('admin', 'manager')
 def add_product():
     data = request.json
     pid = str(uuid.uuid4())
@@ -128,17 +215,10 @@ def add_product():
         c.execute('''
             INSERT INTO products (id, sku, name, category, unit, quantity, location, min_stock, price, description, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            pid, data['sku'], data['name'], data.get('category', ''),
-            data.get('unit', 'cái'), data.get('quantity', 0), data.get('location', ''),
-            data.get('min_stock', 10), data.get('price', 0), data.get('description', ''), now
-        ))
+        ''', (pid, data['sku'], data['name'], data.get('category', ''), data.get('unit', 'cái'), data.get('quantity', 0), data.get('location', ''), data.get('min_stock', 10), data.get('price', 0), data.get('description', ''), now))
         if data.get('quantity', 0) > 0:
             mid = str(uuid.uuid4())
-            c.execute('''
-                INSERT INTO movements (id, product_id, type, quantity, note, created_at)
-                VALUES (%s, %s, 'in', %s, 'Thêm sản phẩm mới', %s)
-            ''', (mid, pid, data.get('quantity', 0), now))
+            c.execute('''INSERT INTO movements (id, product_id, type, quantity, note, user_id, created_at) VALUES (%s, %s, 'in', %s, 'Thêm sản phẩm mới', %s, %s)''', (mid, pid, data.get('quantity', 0), session.get('user_id'), now))
         conn.commit()
         conn.close()
         return jsonify({'id': pid, 'success': True}), 201
@@ -147,23 +227,18 @@ def add_product():
         return jsonify({'error': str(e)}), 400
 
 @app.route('/api/products/<pid>', methods=['PUT'])
+@role_required('admin', 'manager')
 def update_product(pid):
     data = request.json
     conn = get_db()
     c = conn.cursor()
-    c.execute('''
-        UPDATE products SET name=%s, category=%s, unit=%s, location=%s, min_stock=%s, price=%s, description=%s
-        WHERE id=%s
-    ''', (
-        data.get('name'), data.get('category'), data.get('unit'),
-        data.get('location'), data.get('min_stock'), data.get('price'),
-        data.get('description'), pid
-    ))
+    c.execute('''UPDATE products SET name=%s, category=%s, unit=%s, location=%s, min_stock=%s, price=%s, description=%s WHERE id=%s''', (data.get('name'), data.get('category'), data.get('unit'), data.get('location'), data.get('min_stock'), data.get('price'), data.get('description'), pid))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
 
 @app.route('/api/products/<pid>', methods=['DELETE'])
+@role_required('admin')
 def delete_product(pid):
     conn = get_db()
     c = conn.cursor()
@@ -174,6 +249,7 @@ def delete_product(pid):
     return jsonify({'success': True})
 
 @app.route('/api/stock/in', methods=['POST'])
+@login_required
 def stock_in():
     data = request.json
     pid = data['product_id']
@@ -184,15 +260,13 @@ def stock_in():
     c = conn.cursor()
     c.execute('UPDATE products SET quantity = quantity + %s WHERE id=%s', (qty, pid))
     mid = str(uuid.uuid4())
-    c.execute('''
-        INSERT INTO movements (id, product_id, type, quantity, note, created_at)
-        VALUES (%s, %s, 'in', %s, %s, %s)
-    ''', (mid, pid, qty, note, now))
+    c.execute('''INSERT INTO movements (id, product_id, type, quantity, note, user_id, created_at) VALUES (%s, %s, 'in', %s, %s, %s, %s)''', (mid, pid, qty, note, session.get('user_id'), now))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
 
 @app.route('/api/stock/out', methods=['POST'])
+@login_required
 def stock_out():
     data = request.json
     pid = data['product_id']
@@ -208,15 +282,13 @@ def stock_out():
         return jsonify({'error': 'Không đủ tồn kho'}), 400
     c.execute('UPDATE products SET quantity = quantity - %s WHERE id=%s', (qty, pid))
     mid = str(uuid.uuid4())
-    c.execute('''
-        INSERT INTO movements (id, product_id, type, quantity, note, created_at)
-        VALUES (%s, %s, 'out', %s, %s, %s)
-    ''', (mid, pid, qty, note, now))
+    c.execute('''INSERT INTO movements (id, product_id, type, quantity, note, user_id, created_at) VALUES (%s, %s, 'out', %s, %s, %s, %s)''', (mid, pid, qty, note, session.get('user_id'), now))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
 
 @app.route('/api/stock/adjust', methods=['POST'])
+@role_required('admin', 'manager')
 def stock_adjust():
     data = request.json
     pid = data['product_id']
@@ -233,31 +305,24 @@ def stock_adjust():
     diff = new_qty - row[0]
     c.execute('UPDATE products SET quantity = %s WHERE id=%s', (new_qty, pid))
     mid = str(uuid.uuid4())
-    c.execute('''
-        INSERT INTO movements (id, product_id, type, quantity, note, created_at)
-        VALUES (%s, %s, 'adjust', %s, %s, %s)
-    ''', (mid, pid, diff, note, now))
+    c.execute('''INSERT INTO movements (id, product_id, type, quantity, note, user_id, created_at) VALUES (%s, %s, 'adjust', %s, %s, %s, %s)''', (mid, pid, diff, note, session.get('user_id'), now))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
 
 @app.route('/api/movements', methods=['GET'])
+@login_required
 def get_movements():
     limit = request.args.get('limit', 50, type=int)
     conn = get_db()
     c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute('''
-        SELECT m.*, p.name as product_name, p.sku
-        FROM movements m
-        JOIN products p ON m.product_id = p.id
-        ORDER BY m.created_at DESC
-        LIMIT %s
-    ''', (limit,))
+    c.execute('''SELECT m.*, p.name as product_name, p.sku, u.name as user_name FROM movements m JOIN products p ON m.product_id = p.id LEFT JOIN users u ON m.user_id = u.id ORDER BY m.created_at DESC LIMIT %s''', (limit,))
     rows = c.fetchall()
     conn.close()
     return jsonify(rows)
 
 @app.route('/api/stats', methods=['GET'])
+@login_required
 def get_stats():
     conn = get_db()
     c = conn.cursor()
@@ -270,14 +335,10 @@ def get_stats():
     c.execute('SELECT COUNT(*) FROM products WHERE quantity <= min_stock')
     low_stock = c.fetchone()[0]
     conn.close()
-    return jsonify({
-        'total_products': total_products,
-        'total_quantity': total_quantity,
-        'total_value': round(float(total_value), 0),
-        'low_stock': low_stock
-    })
+    return jsonify({'total_products': total_products, 'total_quantity': total_quantity, 'total_value': round(float(total_value), 0), 'low_stock': low_stock})
 
 @app.route('/api/categories', methods=['GET'])
+@login_required
 def get_categories():
     conn = get_db()
     c = conn.cursor()
